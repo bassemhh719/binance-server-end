@@ -9,107 +9,81 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// مفاتيح باينانس من Railway
+// مفاتيح API من متغيرات البيئة في Railway
 const API_KEY = process.env.BINANCE_API_KEY;
 const API_SECRET = process.env.BINANCE_API_SECRET;
 
-const BINANCE_BASE = "https://api.binance.com";
-
-// ========================
-// أدوات
-// ========================
-
+// دالة لإنشاء التوقيع
 function createSignature(queryString, secret) {
-  return crypto
-    .createHmac("sha256", secret)
-    .update(queryString)
-    .digest("hex");
+  return crypto.createHmac("sha256", secret).update(queryString).digest("hex");
 }
 
-function buildQuery(params) {
-  return Object.keys(params)
-    .map(k => `${k}=${encodeURIComponent(params[k])}`)
-    .join("&");
-}
-
-// ========================
 // الصفحة الرئيسية
-// ========================
-
 app.get("/", (req, res) => {
   res.json({
     status: "Running",
-    proxy: "/binance/*",
-    apiKeyLoaded: !!API_KEY
+    message: "Use /binance/* as a general proxy for Binance Futures API",
+    apiKeyLoaded: !!API_KEY,
   });
 });
 
-// ========================
-// بروكسي عام + موقّع ذكي
-// ========================
-
+// بروكسي عام لأي طلب Binance Futures
 app.all("/binance/*", async (req, res) => {
   try {
-
-    const path = req.params[0]; 
-    const isSigned = req.headers["x-binance-signed"] === "true";
-
-    let params = { ...req.query };
-
-    let headers = {
-      "Content-Type": "application/json"
-    };
-
-    // تمرير أي headers إضافية
-    Object.keys(req.headers).forEach(h => {
-      if (!["host", "content-length"].includes(h)) {
-        headers[h] = req.headers[h];
-      }
-    });
-
-    // لو الطلب محتاج توقيع
-    if (isSigned) {
-
-      if (!API_KEY || !API_SECRET) {
-        return res.status(400).json({ error: "API keys not configured" });
-      }
-
-      params.timestamp = Date.now();
-
-      const queryString = buildQuery(params);
-      const signature = createSignature(queryString, API_SECRET);
-
-      params.signature = signature;
-
-      headers["X-MBX-APIKEY"] = API_KEY;
+    if (!API_KEY || !API_SECRET) {
+      return res.status(400).json({ error: "API Key or Secret not configured" });
     }
 
-    const finalQuery = buildQuery(params);
-    const url = `${BINANCE_BASE}/${path}${finalQuery ? "?" + finalQuery : ""}`;
+    // نأخذ endpoint من الرابط
+    const endpoint = req.path.replace("/binance", "");
 
-    console.log("➡️ Binance request:", url);
+    // أي params جايه من العميل (GET query أو POST body)
+    const params = req.method === "GET" ? req.query : req.body.params || {};
 
-    const response = await fetch(url, {
+    // نضيف timestamp لكل طلب موقّع
+    const timestamp = Date.now();
+    const allParams = { ...params, timestamp };
+
+    // نحول الـ params لسلسلة query
+    const queryString = Object.keys(allParams)
+      .map((key) => `${key}=${encodeURIComponent(allParams[key])}`)
+      .join("&");
+
+    // نعمل التوقيع
+    const signature = createSignature(queryString, API_SECRET);
+
+    // رابط API الكامل
+    const url = `https://fapi.binance.com${endpoint}?${queryString}&signature=${signature}`;
+
+    // أي headers إضافية
+    const headers = {
+      "X-MBX-APIKEY": API_KEY,
+      "Content-Type": "application/json",
+      ...req.headers, // يسمح بتمرير أي headers إضافية من العميل
+    };
+
+    // نحدد طريقة الطلب GET أو POST
+    const options = {
       method: req.method,
       headers,
-      body: ["GET", "HEAD"].includes(req.method)
-        ? undefined
-        : JSON.stringify(req.body)
-    });
+    };
 
-    const text = await response.text();
+    // لو POST مع body
+    if (req.method === "POST") {
+      options.body = JSON.stringify(req.body.data || {});
+    }
 
-    res.status(response.status).send(text);
+    const response = await fetch(url, options);
+    const data = await response.json();
 
+    res.json(data);
   } catch (err) {
     console.error("Proxy error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ========================
-
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Proxy running on", PORT);
-  console.log("API loaded:", !!API_KEY);
+  console.log(`Binance Futures Proxy running on port ${PORT}`);
+  console.log(`API Key loaded: ${!!API_KEY}`);
 });
