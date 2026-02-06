@@ -7,12 +7,14 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-// نقطة نهاية للتحقق من أن السيرفر يعمل
 app.get("/", (req, res) => {
-  res.json({ status: "Server is running", message: "Use /proxy?url=YOUR_URL" });
+  res.json({ 
+    status: "Server is running", 
+    message: "Use /proxy?url=YOUR_URL",
+    port: PORT 
+  });
 });
 
-// بروكسي لباينانس أو أي API آخر
 app.get("/proxy", async (req, res) => {
   try {
     const url = req.query.url;
@@ -21,6 +23,7 @@ app.get("/proxy", async (req, res) => {
       return res.status(400).json({ error: "Missing url parameter" });
     }
 
+    console.log("Fetching URL:", url);
     const response = await fetch(url);
     const data = await response.text();
 
@@ -32,6 +35,6 @@ app.get("/proxy", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
